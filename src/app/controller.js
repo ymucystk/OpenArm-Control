@@ -3,6 +3,7 @@ import * as React from 'react'
 import "./controller.css";
 
 export default function Controller(props) {
+  const {vrMode} = props
   const {body_link0_rotate, base_link_left_rotate, base_link_right_rotate} = props
   const {link1_left_rotate, link1_right_rotate, link2_left_rotate, link2_right_rotate, link3_left_rotate, link3_right_rotate} = props
   const {link4_left_rotate, link4_right_rotate, link5_left_rotate, link5_right_rotate, link6_left_rotate, link6_right_rotate} = props
@@ -211,7 +212,7 @@ export default function Controller(props) {
 
   return (
     <>
-      <div className="controller" >
+      <div className="controller" style={{display: vrMode ? 'none' : undefined}}>
         <div className="row mb-2">
           <div className="col-md-4"><label htmlFor="body_rotate_number" className="form-label"><span className="form-control-plaintext">body</span></label></div>
           <div className="col-md-8"><input type="number" className="form-control" id="body_rotate_number" value={body_link0_rotate} onChange={set_body_link0_rotate} min={-180} max={180}/></div>
@@ -262,7 +263,7 @@ export default function Controller(props) {
         </div>
 
       </div>
-      <div className="camera-controller" >
+      <div className="camera-controller" style={{display: vrMode ? 'none' : undefined}}>
         <span>CAMERA</span>
         <div className="row mb-2">
           <div className="col-md-4"><label htmlFor="c_pos_x_number" className="form-label"><span className="form-control-plaintext">pos X</span></label></div>
