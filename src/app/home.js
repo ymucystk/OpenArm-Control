@@ -40,7 +40,7 @@ const z_vec_base = new THREE.Vector3(0,0,1).normalize()
 const object3D_map = {}
 const rotate_table = {}
 
-// 右腕ジョイントの名称、回転軸、VR制御用の現在状態
+// 左右腕ジョイントの名称と回転軸
 const rightArmJoints = [
   { name: 'link1_right', axis: x_vec_base },
   { name: 'link2_right', axis: z_vec_base },
@@ -50,21 +50,30 @@ const rightArmJoints = [
   { name: 'link6_right', axis: x_vec_base },
   { name: 'gripper_base_right', axis: z_vec_base },
 ]
+const leftArmJoints = rightArmJoints.map(({ name, axis }) => ({
+  name: name.replace('_right', '_left'),
+  axis,
+}))
 const rightArmActuatedJoints = rightArmJoints.slice(0, -1)
 const rightArmJointNames = rightArmJoints.map(({ name }) => name)
-const rightArmIkJoints = rightArmJoints
+const leftArmJointNames = leftArmJoints.map(({ name }) => name)
 const gripperRotationCorrection = new THREE.Quaternion().setFromEuler(
   new THREE.Euler(-0.90547681593465818450801077069189, Math.PI, 0, 'ZYX'),
 )
-const rightArmVr = {
-  inVr: false,
-  active: false,
-  angles: Object.fromEntries(rightArmJointNames.map((name) => [name, 0])),
-  positionOffset: new THREE.Vector3(),
-  gripLevel: 0,
-  lastSyncTime: 0,
+function createArmVrState(joints) {
+  return {
+    inVr: false,
+    active: false,
+    angles: Object.fromEntries(joints.map(({ name }) => [name, 0])),
+    positionOffset: new THREE.Vector3(),
+    gripLevel: 0,
+    lastSyncTime: 0,
+  }
 }
+const rightArmVr = createArmVrState(rightArmJoints)
+const leftArmVr = createArmVrState(leftArmJoints)
 let syncRightArmControls = () => {}
+let syncLeftArmControls = () => {}
 
 // 通常制御時の関節移動速度と、ジョイントごとの移動上限
 let target_move_distance = 0
@@ -150,9 +159,10 @@ function solveLinearSystem(matrix, vector) {
 }
 
 // グリッパーの位置とワールド姿勢を同時に合わせるダンピング付きIK
-function updateRightArmIk(targetPosition, targetRotation, deltaSeconds) {
-  const endEffector = object3D_map.gripper_base_right
-  if (!endEffector || rightArmIkJoints.some(({ name }) => !object3D_map[name])) {
+function updateArmIk(armJoints, armVr, targetPosition, targetRotation, deltaSeconds) {
+  const link4Name = armJoints.find(({ name }) => name.startsWith('link4_')).name
+  const endEffector = object3D_map[armJoints[armJoints.length - 1].name]
+  if (!endEffector || armJoints.some(({ name }) => !object3D_map[name])) {
     return false
   }
   const getEndPosition = () => endEffector.getWorldPosition(new THREE.Vector3()).add(
@@ -169,8 +179,8 @@ function updateRightArmIk(targetPosition, targetRotation, deltaSeconds) {
     ? Math.max(1 / 120, Math.min(deltaSeconds, 1 / 20))
     : 1 / 60
   const stepLimit = maxJointSpeed * frameTime / iterations
-  const allJointIndices = rightArmIkJoints.map((_, index) => index)
-  const link4Index = rightArmIkJoints.findIndex(({ name }) => name === 'link4_right')
+  const allJointIndices = armJoints.map((_, index) => index)
+  const link4Index = armJoints.findIndex(({ name }) => name === link4Name)
   const solveJointSteps = (jacobian, error, jointIndices) => {
     const taskDimensions = error.length
     const normalMatrix = Array.from({ length: taskDimensions }, (_, row) =>
@@ -183,7 +193,7 @@ function updateRightArmIk(targetPosition, targetRotation, deltaSeconds) {
       }),
     )
     const correction = solveLinearSystem(normalMatrix, error)
-    const steps = Array(rightArmIkJoints.length).fill(0)
+    const steps = Array(armJoints.length).fill(0)
     for (const jointIndex of jointIndices) {
       steps[jointIndex] = Math.max(-stepLimit, Math.min(stepLimit,
         jacobian.reduce((sum, row, rowIndex) => sum + row[jointIndex] * correction[rowIndex], 0)))
@@ -214,9 +224,9 @@ function updateRightArmIk(targetPosition, targetRotation, deltaSeconds) {
       rotationError.y * rotationScale * orientationWeight,
       rotationError.z * rotationScale * orientationWeight,
     ]
-    const jacobian = Array.from({ length: 6 }, () => Array(rightArmIkJoints.length).fill(0))
-    for (let jointIndex = 0; jointIndex < rightArmIkJoints.length; jointIndex += 1) {
-      const { name, axis } = rightArmIkJoints[jointIndex]
+    const jacobian = Array.from({ length: 6 }, () => Array(armJoints.length).fill(0))
+    for (let jointIndex = 0; jointIndex < armJoints.length; jointIndex += 1) {
+      const { name, axis } = armJoints[jointIndex]
       const joint = object3D_map[name]
       const jointPosition = joint.getWorldPosition(new THREE.Vector3())
       const worldAxis = axis.clone().applyQuaternion(joint.getWorldQuaternion(new THREE.Quaternion())).normalize()
@@ -230,7 +240,7 @@ function updateRightArmIk(targetPosition, targetRotation, deltaSeconds) {
     }
 
     const steps = solveJointSteps(jacobian, error, allJointIndices)
-    const link4Angle = rightArmVr.angles.link4_right
+    const link4Angle = armVr.angles[link4Name]
     const preferredNegativeStep = link4Angle > 0
       ? Math.max(-stepLimit, -toRadian(link4Angle))
       : link4Angle === 0
@@ -263,30 +273,32 @@ function updateRightArmIk(targetPosition, targetRotation, deltaSeconds) {
       }
     }
 
-    for (let jointIndex = 0; jointIndex < rightArmIkJoints.length; jointIndex += 1) {
-      const { name, axis } = rightArmIkJoints[jointIndex]
-      const nextAngle = rightArmVr.angles[name] + toAngle(steps[jointIndex])
-      rightArmVr.angles[name] = name === 'link4_right'
+    for (let jointIndex = 0; jointIndex < armJoints.length; jointIndex += 1) {
+      const { name, axis } = armJoints[jointIndex]
+      const nextAngle = armVr.angles[name] + toAngle(steps[jointIndex])
+      armVr.angles[name] = name === link4Name
         ? Math.max(-140, Math.min(50, nextAngle))
         : normalize180(nextAngle)
-      object3D_map[name].quaternion.setFromAxisAngle(axis, toRadian(rightArmVr.angles[name]))
+      object3D_map[name].quaternion.setFromAxisAngle(axis, toRadian(armVr.angles[name]))
     }
   }
   return true
 }
 
-// グリップレベルに応じて右腕の内外フィンガーを開閉する
-function setRightGripperLevel(level) {
-  rightArmVr.gripLevel = Math.max(0, Math.min(1, level))
-  const openAmount = 1 - rightArmVr.gripLevel
-  if (object3D_map.finger_inner_right) {
-    object3D_map.finger_inner_right.quaternion.setFromAxisAngle(
+// グリップレベルに応じて内外フィンガーを開閉する
+function setArmGripperLevel(side, armVr, level) {
+  armVr.gripLevel = Math.max(0, Math.min(1, level))
+  const openAmount = 1 - armVr.gripLevel
+  const innerFinger = object3D_map[`finger_inner_${side}`]
+  const outerFinger = object3D_map[`finger_outer_${side}`]
+  if (innerFinger) {
+    innerFinger.quaternion.setFromAxisAngle(
       z_vec_base,
       toRadian(openAmount * 30),
     )
   }
-  if (object3D_map.finger_outer_right) {
-    object3D_map.finger_outer_right.quaternion.setFromAxisAngle(
+  if (outerFinger) {
+    outerFinger.quaternion.setFromAxisAngle(
       z_vec_base,
       toRadian(openAmount * -30),
     )
@@ -294,9 +306,9 @@ function setRightGripperLevel(level) {
 }
 
 // IK状態をReact側の各ジョイント角度へ同期する
-function syncRightArmState() {
-  syncRightArmControls(rightArmVr.angles, rightArmVr.gripLevel)
-  rightArmVr.lastSyncTime = performance.now()
+function syncArmState(armVr, syncControls) {
+  syncControls(armVr.angles, armVr.gripLevel)
+  armVr.lastSyncTime = performance.now()
 }
 
 // Homeコンポーネント本体。ロボット状態、A-Frameシーン、コントローラーを統合する
@@ -325,12 +337,12 @@ export default function Home(props) {
   const [link6_right_rotate, set_link6_right_rotate ] = useRefState(0)
   const [gripper_base_left_rotate, set_gripper_base_left_rotate ] = useRefState(0)
   const [gripper_base_right_rotate, set_gripper_base_right_rotate ] = useRefState(0)
-  const [finger_inner_left_rotate, set_finger_inner_left_rotate ] = useRefState(0)
+  const [finger_inner_left_rotate, set_finger_inner_left_rotate ] = useRefState(30)
   const [finger_inner_right_rotate, set_finger_inner_right_rotate ] = useRefState(30)
-  const [finger_outer_left_rotate, set_finger_outer_left_rotate ] = useRefState(0)
+  const [finger_outer_left_rotate, set_finger_outer_left_rotate ] = useRefState(-30)
   const [finger_outer_right_rotate, set_finger_outer_right_rotate ] = useRefState(-30)
 
-  // VR制御で変更した右腕角度をReact状態へ反映する
+  // VR制御で変更した左右腕角度をReact状態へ反映する
   React.useEffect(() => {
     syncRightArmControls = (angles, gripLevel) => {
       set_link1_right_rotate(angles.link1_right)
@@ -344,8 +356,21 @@ export default function Home(props) {
       set_finger_inner_right_rotate(openAmount * 30)
       set_finger_outer_right_rotate(openAmount * -30)
     }
+    syncLeftArmControls = (angles, gripLevel) => {
+      set_link1_left_rotate(angles.link1_left)
+      set_link2_left_rotate(angles.link2_left)
+      set_link3_left_rotate(angles.link3_left)
+      set_link4_left_rotate(angles.link4_left)
+      set_link5_left_rotate(angles.link5_left)
+      set_link6_left_rotate(angles.link6_left)
+      set_gripper_base_left_rotate(angles.gripper_base_left)
+      const openAmount = 1 - gripLevel
+      set_finger_inner_left_rotate(openAmount * 30)
+      set_finger_outer_left_rotate(openAmount * -30)
+    }
     return () => {
       syncRightArmControls = () => {}
+      syncLeftArmControls = () => {}
     }
   }, [])
 
@@ -363,11 +388,13 @@ export default function Home(props) {
     const key_num = joint_keys.length
     for (let i = 0; i < key_num; i = i + 1) {
       const key = joint_keys[i]
-      if (rightArmVr.active && rightArmJointNames.includes(key)) {
+      if ((rightArmVr.active && rightArmJointNames.includes(key)) ||
+          (leftArmVr.active && leftArmJointNames.includes(key))) {
         delete rotate_table[key]
         continue
       }
-      if (rightArmVr.inVr && (key === 'finger_inner_right' || key === 'finger_outer_right')) {
+      if ((rightArmVr.inVr && (key === 'finger_inner_right' || key === 'finger_outer_right')) ||
+          (leftArmVr.inVr && (key === 'finger_inner_left' || key === 'finger_outer_left'))) {
         delete rotate_table[key]
         continue
       }
@@ -539,10 +566,10 @@ export default function Home(props) {
         }
       });
 
-      // VR右コントローラーの位置と姿勢で右腕IKを制御し、グリップ入力で指を開閉する
-      AFRAME.registerComponent('right-arm-vr-control', {
+      // 左右のVRコントローラーで各腕のIKを制御し、グリップ入力で指を開閉する
+      AFRAME.registerComponent('arm-vr-control', {
         init: function () {
-          this.previousTrigger = false
+          this.previousTrigger = { left: false, right: false }
           this.rig = null
         },
         tick: function (time, timeDelta) {
@@ -551,103 +578,116 @@ export default function Home(props) {
           const session = xr && xr.getSession()
           if (!session) {
             setVrMode(false)
-            if (rightArmVr.active || rightArmVr.inVr) {
-              rightArmVr.active = false
-              rightArmVr.inVr = false
-              syncRightArmState()
+            for (const [armVr, syncControls] of [
+              [leftArmVr, syncLeftArmControls],
+              [rightArmVr, syncRightArmControls],
+            ]) {
+              if (armVr.active || armVr.inVr) {
+                armVr.active = false
+                armVr.inVr = false
+                syncArmState(armVr, syncControls)
+              }
             }
-            this.previousTrigger = false
+            this.previousTrigger.left = false
+            this.previousTrigger.right = false
             return
           }
 
           setVrMode(true)
+          leftArmVr.inVr = true
           rightArmVr.inVr = true
           const sources = Array.from(session.inputSources)
-          const rightIndex = sources.findIndex((source) => source.handedness === 'right')
-          if (rightIndex < 0) {
-            if (rightArmVr.active) {
-              rightArmVr.active = false
-              syncRightArmState()
-            }
-            this.previousTrigger = false
-            return
-          }
-
-          const inputSource = sources[rightIndex]
-          const buttons = inputSource.gamepad && inputSource.gamepad.buttons
-          const triggerButton = buttons && buttons[0]
-          const gripButton = buttons && buttons[1]
-          const triggerPressed = Boolean(triggerButton && (triggerButton.pressed || triggerButton.value > 0.5))
-          const gripLevel = gripButton && Number.isFinite(gripButton.value)
-            ? Math.max(0, Math.min(1, gripButton.value))
-            : Number(Boolean(gripButton && gripButton.pressed))
-          const gripChanged = Math.abs(gripLevel - rightArmVr.gripLevel) > 0.001
-          setRightGripperLevel(gripLevel)
-
-          if (!triggerPressed) {
-            if (rightArmVr.active) {
-              rightArmVr.active = false
-              syncRightArmState()
-            }
-            this.previousTrigger = false
-            return
-          }
-
           const frame = scene.frame || xr.getFrame()
           const referenceSpace = xr.getReferenceSpace()
-          const gripPose = inputSource.gripSpace && frame && referenceSpace
-            ? frame.getPose(inputSource.gripSpace, referenceSpace)
-            : null
-          if (!gripPose) return
+          const processArmInput = (side, armVr, armJoints, inputSource, syncControls) => {
+            if (!inputSource) {
+              if (armVr.active) {
+                armVr.active = false
+                syncArmState(armVr, syncControls)
+              }
+              this.previousTrigger[side] = false
+              return
+            }
 
-          if (!this.rig) {
-            this.rig = scene.querySelector('#rig')
-            if (!this.rig) return
-          }
-          this.rig.object3D.updateWorldMatrix(true, false)
-          const rigRotation = this.rig.object3D.getWorldQuaternion(new THREE.Quaternion())
-          const controllerPosition = new THREE.Vector3(
-            gripPose.transform.position.x,
-            gripPose.transform.position.y,
-            gripPose.transform.position.z,
-          ).applyMatrix4(this.rig.object3D.matrixWorld)
-          const controllerRotation = new THREE.Quaternion(
-            gripPose.transform.orientation.x,
-            gripPose.transform.orientation.y,
-            gripPose.transform.orientation.z,
-            gripPose.transform.orientation.w,
-          ).premultiply(rigRotation)
+            const buttons = inputSource.gamepad && inputSource.gamepad.buttons
+            const triggerButton = buttons && buttons[0]
+            const gripButton = buttons && buttons[1]
+            const triggerPressed = Boolean(triggerButton && (triggerButton.pressed || triggerButton.value > 0.5))
+            const gripLevel = gripButton && Number.isFinite(gripButton.value)
+              ? Math.max(0, Math.min(1, gripButton.value))
+              : Number(Boolean(gripButton && gripButton.pressed))
+            const gripChanged = Math.abs(gripLevel - armVr.gripLevel) > 0.001
+            setArmGripperLevel(side, armVr, gripLevel)
 
-          if (!rightArmVr.active || !this.previousTrigger) {
-            if (rightArmIkJoints.some(({ name }) => !object3D_map[name])) return
-            const gripperBase = object3D_map.gripper_base_right
-            object3D_map.body_link0.updateWorldMatrix(true, true)
-            const gripperPosition = gripperBase.getWorldPosition(new THREE.Vector3())
-            const gripperRotation = gripperBase.getWorldQuaternion(new THREE.Quaternion())
-            const gripperVector = new THREE.Vector3(0, -0.165, -0.0202)
-              .applyQuaternion(gripperRotation)
-            const endPosition = gripperPosition.clone().add(gripperVector)
-            rightArmIkJoints.forEach(({ name, axis }) => {
-              const quaternion = object3D_map[name].quaternion
-              const projection = quaternion.x * axis.x + quaternion.y * axis.y + quaternion.z * axis.z
-              const angle = normalize180(toAngle(2 * Math.atan2(projection, quaternion.w)))
-              rightArmVr.angles[name] = name === 'link4_right'
-                ? Math.max(-140, Math.min(50, angle))
-                : angle
-              object3D_map[name].quaternion.setFromAxisAngle(axis, toRadian(rightArmVr.angles[name]))
-              delete rotate_table[name]
-            })
-            rightArmVr.positionOffset.copy(endPosition.sub(controllerPosition))
-            rightArmVr.active = true
+            if (!triggerPressed) {
+              if (armVr.active) {
+                armVr.active = false
+                syncArmState(armVr, syncControls)
+              }
+              this.previousTrigger[side] = false
+              return
+            }
+
+            const gripPose = inputSource.gripSpace && frame && referenceSpace
+              ? frame.getPose(inputSource.gripSpace, referenceSpace)
+              : null
+            if (!gripPose) return
+
+            if (!this.rig) {
+              this.rig = scene.querySelector('#rig')
+              if (!this.rig) return
+            }
+            this.rig.object3D.updateWorldMatrix(true, false)
+            const rigRotation = this.rig.object3D.getWorldQuaternion(new THREE.Quaternion())
+            const controllerPosition = new THREE.Vector3(
+              gripPose.transform.position.x,
+              gripPose.transform.position.y,
+              gripPose.transform.position.z,
+            ).applyMatrix4(this.rig.object3D.matrixWorld)
+            const controllerRotation = new THREE.Quaternion(
+              gripPose.transform.orientation.x,
+              gripPose.transform.orientation.y,
+              gripPose.transform.orientation.z,
+              gripPose.transform.orientation.w,
+            ).premultiply(rigRotation)
+
+            if (!armVr.active || !this.previousTrigger[side]) {
+              if (armJoints.some(({ name }) => !object3D_map[name])) return
+              const gripperBase = object3D_map[`gripper_base_${side}`]
+              object3D_map.body_link0.updateWorldMatrix(true, true)
+              const gripperPosition = gripperBase.getWorldPosition(new THREE.Vector3())
+              const gripperRotation = gripperBase.getWorldQuaternion(new THREE.Quaternion())
+              const gripperVector = new THREE.Vector3(0, -0.165, -0.0202)
+                .applyQuaternion(gripperRotation)
+              const endPosition = gripperPosition.clone().add(gripperVector)
+              const link4Name = `link4_${side}`
+              armJoints.forEach(({ name, axis }) => {
+                const quaternion = object3D_map[name].quaternion
+                const projection = quaternion.x * axis.x + quaternion.y * axis.y + quaternion.z * axis.z
+                const angle = normalize180(toAngle(2 * Math.atan2(projection, quaternion.w)))
+                armVr.angles[name] = name === link4Name
+                  ? Math.max(-140, Math.min(50, angle))
+                  : angle
+                object3D_map[name].quaternion.setFromAxisAngle(axis, toRadian(armVr.angles[name]))
+                delete rotate_table[name]
+              })
+              armVr.positionOffset.copy(endPosition.sub(controllerPosition))
+              armVr.active = true
+            }
+
+            const targetPosition = controllerPosition.clone().add(armVr.positionOffset)
+            const targetRotation = controllerRotation.clone().multiply(gripperRotationCorrection)
+            const ikUpdated = updateArmIk(armJoints, armVr, targetPosition, targetRotation, timeDelta / 1000)
+            if ((ikUpdated || gripChanged) && performance.now() - armVr.lastSyncTime > 100) {
+              syncArmState(armVr, syncControls)
+            }
+            this.previousTrigger[side] = true
           }
 
-          const targetPosition = controllerPosition.clone().add(rightArmVr.positionOffset)
-          const targetRotation = controllerRotation.clone().multiply(gripperRotationCorrection)
-          const ikUpdated = updateRightArmIk(targetPosition, targetRotation, timeDelta / 1000)
-          if ((ikUpdated || gripChanged) && performance.now() - rightArmVr.lastSyncTime > 100) {
-            syncRightArmState()
-          }
-          this.previousTrigger = true
+          const leftInput = sources.find((source) => source.handedness === 'left')
+          const rightInput = sources.find((source) => source.handedness === 'right')
+          processArmInput('left', leftArmVr, leftArmJoints, leftInput, syncLeftArmControls)
+          processArmInput('right', rightArmVr, rightArmJoints, rightInput, syncRightArmControls)
         },
       })
     }
@@ -690,7 +730,7 @@ export default function Home(props) {
   if(rendered){
     return (
     <>
-      <a-scene scene right-arm-vr-control>
+      <a-scene scene arm-vr-control>
         {/* 広場の床と影を受ける床面 */}
         <a-plane position="0 0 0" rotation="-90 0 0" width="10" height="10" color="#7BC8A4" shadow></a-plane>
         {/* モデルアセットとロボット階層 */}
