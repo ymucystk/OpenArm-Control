@@ -571,12 +571,17 @@ export default function Home(props) {
         init: function () {
           this.previousTrigger = { left: false, right: false }
           this.rig = null
+          this.vrActive = false
         },
         tick: function (time, timeDelta) {
           const scene = this.el
           const xr = scene.renderer && scene.renderer.xr
           const session = xr && xr.getSession()
           if (!session) {
+            if (this.vrActive) {
+              set_c_pos_y(1.4)
+              this.vrActive = false
+            }
             setVrMode(false)
             for (const [armVr, syncControls] of [
               [leftArmVr, syncLeftArmControls],
@@ -593,6 +598,10 @@ export default function Home(props) {
             return
           }
 
+          if (!this.vrActive) {
+            set_c_pos_y(1)
+            this.vrActive = true
+          }
           setVrMode(true)
           leftArmVr.inVr = true
           rightArmVr.inVr = true
