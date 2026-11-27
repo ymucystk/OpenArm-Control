@@ -7,7 +7,7 @@ import Controller from './controller.js'
 
 // 各関節モデルの親エンティティに対する初期位置オフセット
 const joint_pos = {
-  body_link0:{x:0,y:0,z:0},
+  body_link0:{x:0,y:1,z:0},
   base_link_left:{x:0.03,y:0.697,z:0},
   base_link_right:{x:-0.03,y:0.697,z:0},
   link1_left:{x:0.062,y:0.0,z:0},
@@ -376,7 +376,7 @@ export default function Home(props) {
 
   // カメラリグの位置と回転状態
   const [c_pos_x,set_c_pos_x] = useRefState(0)
-  const [c_pos_y,set_c_pos_y] = useRefState(0.4)
+  const [c_pos_y,set_c_pos_y] = useRefState(1.4)
   const [c_pos_z,set_c_pos_z] = useRefState(-0.6)
   const [c_deg_x,set_c_deg_x] = useRefState(0)
   const [c_deg_y,set_c_deg_y] = useRefState(180)
@@ -732,7 +732,7 @@ export default function Home(props) {
     <>
       <a-scene scene arm-vr-control>
         {/* 広場の床と影を受ける床面 */}
-        <a-plane position="0 0 0" rotation="-90 0 0" width="10" height="10" color="#7BC8A4" shadow></a-plane>
+        <a-plane position="0 1 0" rotation="-90 0 0" width="10" height="10" color="#7BC8A4" shadow></a-plane>
         {/* モデルアセットとロボット階層 */}
         <Assets/>
         <Robot_data {...robotProps}/>
