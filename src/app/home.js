@@ -57,6 +57,31 @@ const leftArmJoints = rightArmJoints.map(({ name, axis }) => ({
 const rightArmActuatedJoints = rightArmJoints.slice(0, -1)
 const rightArmJointNames = rightArmJoints.map(({ name }) => name)
 const leftArmJointNames = leftArmJoints.map(({ name }) => name)
+const jointAngleLimits = {
+  link2_left: { min: -10, max: 190 },
+  link2_right: { min: -190, max: 10 },
+  link6_left: { min: -50, max: 115 },
+  link6_right: { min: -50, max: 115 },
+  gripper_base_left: { min: -80, max: 80 },
+  gripper_base_right: { min: -80, max: 80 },
+}
+function constrainJointAngle(name, angle, preserveTurns = false) {
+  const limits = jointAngleLimits[name]
+  if (!limits) return normalize180(angle)
+
+  if (name.startsWith('link2_') && !preserveTurns) {
+    const normalizedAngle = normalize180(angle)
+    const equivalentAngles = [normalizedAngle - 360, normalizedAngle, normalizedAngle + 360]
+    angle = equivalentAngles.reduce((closest, candidate) => {
+      const closestDistance = Math.max(limits.min - closest, 0, closest - limits.max)
+      const candidateDistance = Math.max(limits.min - candidate, 0, candidate - limits.max)
+      return candidateDistance < closestDistance ? candidate : closest
+    })
+  } else if (!preserveTurns) {
+    angle = normalize180(angle)
+  }
+  return Math.max(limits.min, Math.min(limits.max, angle))
+}
 const gripperRotationCorrection = new THREE.Quaternion().setFromEuler(
   new THREE.Euler(-0.90547681593465818450801077069189, Math.PI, 0, 'ZYX'),
 )
@@ -158,13 +183,79 @@ function solveLinearSystem(matrix, vector) {
   return augmented.map((row) => row[size])
 }
 
+// glTFメッシュの境界箱を集める（子のジョイント配下は別ジョイントとして扱う）
+function collectArmCollisionMeshes(roots) {
+  const mappedObjects = new Set(Object.values(object3D_map))
+  const meshes = []
+  const visit = (object, root) => {
+    if (object !== root && mappedObjects.has(object)) return
+    if (object.isMesh && object.geometry) {
+      if (!object.geometry.boundingBox) object.geometry.computeBoundingBox()
+      meshes.push(object)
+    }
+    object.children.forEach((child) => visit(child, root))
+  }
+  roots.forEach((root) => {
+    if (root) visit(root, root)
+  })
+  return meshes
+}
+
+// 腕と胴体または反対側の腕のメッシュ境界箱の重なり量を算出する
+function getArmCollisionScore(armMeshes, torsoMeshes, otherArmMeshes, armBounds, torsoBounds, otherArmBounds) {
+  object3D_map.body_link0.updateWorldMatrix(true, true)
+  torsoMeshes.forEach((mesh, index) =>
+    torsoBounds[index].copy(mesh.geometry.boundingBox).applyMatrix4(mesh.matrixWorld),
+  )
+  otherArmMeshes.forEach((mesh, index) =>
+    otherArmBounds[index].copy(mesh.geometry.boundingBox).applyMatrix4(mesh.matrixWorld),
+  )
+  let score = 0
+  for (let armIndex = 0; armIndex < armMeshes.length; armIndex += 1) {
+    const armMesh = armMeshes[armIndex]
+    const armBound = armBounds[armIndex]
+    armBound.copy(armMesh.geometry.boundingBox).applyMatrix4(armMesh.matrixWorld)
+    for (let targetIndex = 0; targetIndex < torsoBounds.length + otherArmBounds.length; targetIndex += 1) {
+      const otherBound = targetIndex < torsoBounds.length
+        ? torsoBounds[targetIndex]
+        : otherArmBounds[targetIndex - torsoBounds.length]
+      if (!armBound.intersectsBox(otherBound)) continue
+      const overlapX = Math.min(armBound.max.x, otherBound.max.x) - Math.max(armBound.min.x, otherBound.min.x)
+      const overlapY = Math.min(armBound.max.y, otherBound.max.y) - Math.max(armBound.min.y, otherBound.min.y)
+      const overlapZ = Math.min(armBound.max.z, otherBound.max.z) - Math.max(armBound.min.z, otherBound.min.z)
+      score += overlapX * overlapY * overlapZ
+    }
+  }
+  return score
+}
+
 // グリッパーの位置とワールド姿勢を同時に合わせるダンピング付きIK
 function updateArmIk(armJoints, armVr, targetPosition, targetRotation, deltaSeconds) {
   const link4Name = armJoints.find(({ name }) => name.startsWith('link4_')).name
+  const side = armJoints[0].name.endsWith('_left') ? 'left' : 'right'
   const endEffector = object3D_map[armJoints[armJoints.length - 1].name]
   if (!endEffector || armJoints.some(({ name }) => !object3D_map[name])) {
     return false
   }
+  const armMeshes = collectArmCollisionMeshes([
+    object3D_map[`link5_${side}`],
+    object3D_map[`link6_${side}`],
+    object3D_map[`gripper_base_${side}`],
+    object3D_map[`finger_inner_${side}`],
+    object3D_map[`finger_outer_${side}`],
+  ])
+  const torsoMeshes = collectArmCollisionMeshes([object3D_map.body_link0])
+  const otherSide = side === 'left' ? 'right' : 'left'
+  const otherArmMeshes = collectArmCollisionMeshes([
+    object3D_map[`link5_${otherSide}`],
+    object3D_map[`link6_${otherSide}`],
+    object3D_map[`gripper_base_${otherSide}`],
+    object3D_map[`finger_inner_${otherSide}`],
+    object3D_map[`finger_outer_${otherSide}`],
+  ])
+  const armBounds = armMeshes.map(() => new THREE.Box3())
+  const torsoBounds = torsoMeshes.map(() => new THREE.Box3())
+  const otherArmBounds = otherArmMeshes.map(() => new THREE.Box3())
   const getEndPosition = () => endEffector.getWorldPosition(new THREE.Vector3()).add(
     new THREE.Vector3(0, -0.165, -0.0202).applyQuaternion(
       endEffector.getWorldQuaternion(new THREE.Quaternion()),
@@ -273,13 +364,35 @@ function updateArmIk(armJoints, armVr, targetPosition, targetRotation, deltaSeco
       }
     }
 
-    for (let jointIndex = 0; jointIndex < armJoints.length; jointIndex += 1) {
-      const { name, axis } = armJoints[jointIndex]
-      const nextAngle = armVr.angles[name] + toAngle(steps[jointIndex])
-      armVr.angles[name] = name === link4Name
-        ? Math.max(-140, Math.min(50, nextAngle))
-        : normalize180(nextAngle)
-      object3D_map[name].quaternion.setFromAxisAngle(axis, toRadian(armVr.angles[name]))
+    const previousAngles = Object.fromEntries(armJoints.map(({ name }) => [name, armVr.angles[name]]))
+    const applySteps = (scale) => {
+      for (let jointIndex = 0; jointIndex < armJoints.length; jointIndex += 1) {
+        const { name, axis } = armJoints[jointIndex]
+        const nextAngle = previousAngles[name] + toAngle(steps[jointIndex] * scale)
+        armVr.angles[name] = name === link4Name
+          ? Math.max(-140, Math.min(50, nextAngle))
+          : constrainJointAngle(name, nextAngle, name.startsWith('link2_'))
+        object3D_map[name].quaternion.setFromAxisAngle(axis, toRadian(armVr.angles[name]))
+      }
+    }
+    const startingCollisionScore = getArmCollisionScore(
+      armMeshes, torsoMeshes, otherArmMeshes, armBounds, torsoBounds, otherArmBounds,
+    )
+    let stepScale = 1
+    let accepted = false
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      applySteps(stepScale)
+      const candidateCollisionScore = getArmCollisionScore(
+        armMeshes, torsoMeshes, otherArmMeshes, armBounds, torsoBounds, otherArmBounds,
+      )
+      if (candidateCollisionScore <= startingCollisionScore + 1e-9) {
+        accepted = true
+        break
+      }
+      stepScale *= 0.5
+    }
+    if (!accepted) {
+      applySteps(0)
     }
   }
   return true
@@ -676,7 +789,7 @@ export default function Home(props) {
                 const angle = normalize180(toAngle(2 * Math.atan2(projection, quaternion.w)))
                 armVr.angles[name] = name === link4Name
                   ? Math.max(-140, Math.min(50, angle))
-                  : angle
+                  : constrainJointAngle(name, angle)
                 object3D_map[name].quaternion.setFromAxisAngle(axis, toRadian(armVr.angles[name]))
                 delete rotate_table[name]
               })

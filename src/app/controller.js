@@ -54,18 +54,12 @@ export default function Controller(props) {
 
   const set_link2_right_rotate = (e)=>{
     let value = Number.parseFloat(e.target.value || 0)
-    if(Math.abs(value)===180){
-      value = value * -1
-    }
-    props.set_link2_right_rotate(value)
+    props.set_link2_right_rotate(Math.max(-190, Math.min(10, value)))
   }
 
   const set_link2_left_rotate = (e)=>{
     let value = Number.parseFloat(e.target.value || 0)
-    if(Math.abs(value)===180){
-      value = value * -1
-    }
-    props.set_link2_left_rotate(value)
+    props.set_link2_left_rotate(Math.max(-10, Math.min(190, value)))
   }
 
   const set_link3_right_rotate = (e)=>{
@@ -118,34 +112,22 @@ export default function Controller(props) {
 
   const set_link6_right_rotate = (e)=>{
     let value = Number.parseFloat(e.target.value || 0)
-    if(Math.abs(value)===180){
-      value = value * -1
-    }
-    props.set_link6_right_rotate(value)
+    props.set_link6_right_rotate(Math.max(-50, Math.min(115, value)))
   }
 
   const set_link6_left_rotate = (e)=>{
     let value = Number.parseFloat(e.target.value || 0)
-    if(Math.abs(value)===180){
-      value = value * -1
-    }
-    props.set_link6_left_rotate(value)
+    props.set_link6_left_rotate(Math.max(-50, Math.min(115, value)))
   }
 
   const set_gripper_base_right_rotate = (e)=>{
     let value = Number.parseFloat(e.target.value || 0)
-    if(Math.abs(value)===180){
-      value = value * -1
-    }
-    props.set_gripper_base_right_rotate(value)
+    props.set_gripper_base_right_rotate(Math.max(-80, Math.min(80, value)))
   }
 
   const set_gripper_base_left_rotate = (e)=>{
     let value = Number.parseFloat(e.target.value || 0)
-    if(Math.abs(value)===180){
-      value = value * -1
-    }
-    props.set_gripper_base_left_rotate(value)
+    props.set_gripper_base_left_rotate(Math.max(-80, Math.min(80, value)))
   }
 
   const set_finger_inner_right_rotate = (e)=>{
@@ -223,7 +205,7 @@ export default function Controller(props) {
           <div className="col-md-4"><label htmlFor="link1_left_rotate" className="form-label"><span className="form-control-plaintext">LINK1</span></label></div>
           <div className="col-md-8"><input type="number" className="form-control" id="link1_left_rotate" value={link1_left_rotate} onChange={set_link1_left_rotate} min={-180} max={180}/></div>
           <div className="col-md-4"><label htmlFor="link2_left_rotate" className="form-label"><span className="form-control-plaintext">LINK2</span></label></div>
-          <div className="col-md-8"><input type="number" className="form-control" id="link2_left_rotate" value={link2_left_rotate} onChange={set_link2_left_rotate} min={-180} max={180}/></div>
+          <div className="col-md-8"><input type="number" className="form-control" id="link2_left_rotate" value={link2_left_rotate} onChange={set_link2_left_rotate} min={-10} max={190}/></div>
           <div className="col-md-4"><label htmlFor="link3_left_rotate" className="form-label"><span className="form-control-plaintext">LINK3</span></label></div>
           <div className="col-md-8"><input type="number" className="form-control" id="link3_left_rotate" value={link3_left_rotate} onChange={set_link3_left_rotate} min={-180} max={180}/></div>
           <div className="col-md-4"><label htmlFor="link4_left_rotate" className="form-label"><span className="form-control-plaintext">LINK4</span></label></div>
@@ -231,9 +213,9 @@ export default function Controller(props) {
           <div className="col-md-4"><label htmlFor="link5_left_rotate" className="form-label"><span className="form-control-plaintext">LINK5</span></label></div>
           <div className="col-md-8"><input type="number" className="form-control" id="link5_left_rotate" value={link5_left_rotate} onChange={set_link5_left_rotate} min={-180} max={180}/></div>
           <div className="col-md-4"><label htmlFor="link6_left_rotate" className="form-label"><span className="form-control-plaintext">LINK6</span></label></div>
-          <div className="col-md-8"><input type="number" className="form-control" id="link6_left_rotate" value={link6_left_rotate} onChange={set_link6_left_rotate} min={-180} max={180}/></div>
+          <div className="col-md-8"><input type="number" className="form-control" id="link6_left_rotate" value={link6_left_rotate} onChange={set_link6_left_rotate} min={-50} max={115}/></div>
           <div className="col-md-4"><label htmlFor="gripper_base_left_rotate" className="form-label"><span className="form-control-plaintext">GRIP</span></label></div>
-          <div className="col-md-8"><input type="number" className="form-control" id="gripper_base_left_rotate" value={gripper_base_left_rotate} onChange={set_gripper_base_left_rotate} min={-180} max={180}/></div>
+          <div className="col-md-8"><input type="number" className="form-control" id="gripper_base_left_rotate" value={gripper_base_left_rotate} onChange={set_gripper_base_left_rotate} min={-80} max={80}/></div>
           <div className="col-md-4"><label htmlFor="finger_inner_left_rotate" className="form-label"><span className="form-control-plaintext">FINGER1</span></label></div>
           <div className="col-md-8"><input type="number" className="form-control" id="finger_inner_left_rotate" value={finger_inner_left_rotate} onChange={set_finger_inner_left_rotate} min={-180} max={180}/></div>
           <div className="col-md-4"><label htmlFor="finger_outer_left_rotate" className="form-label"><span className="form-control-plaintext">FINGER2</span></label></div>
@@ -245,7 +227,7 @@ export default function Controller(props) {
           <div className="col-md-4"><label htmlFor="link1_right_rotate" className="form-label"><span className="form-control-plaintext">LINK1</span></label></div>
           <div className="col-md-8"><input type="number" className="form-control" id="link1_right_rotate" value={link1_right_rotate} onChange={set_link1_right_rotate} min={-180} max={180}/></div>
           <div className="col-md-4"><label htmlFor="link2_right_rotate" className="form-label"><span className="form-control-plaintext">LINK2</span></label></div>
-          <div className="col-md-8"><input type="number" className="form-control" id="link2_right_rotate" value={link2_right_rotate} onChange={set_link2_right_rotate} min={-180} max={180}/></div>
+          <div className="col-md-8"><input type="number" className="form-control" id="link2_right_rotate" value={link2_right_rotate} onChange={set_link2_right_rotate} min={-190} max={10}/></div>
           <div className="col-md-4"><label htmlFor="link3_right_rotate" className="form-label"><span className="form-control-plaintext">LINK3</span></label></div>
           <div className="col-md-8"><input type="number" className="form-control" id="link3_right_rotate" value={link3_right_rotate} onChange={set_link3_right_rotate} min={-180} max={180}/></div>
           <div className="col-md-4"><label htmlFor="link4_right_rotate" className="form-label"><span className="form-control-plaintext">LINK4</span></label></div>
@@ -253,9 +235,9 @@ export default function Controller(props) {
           <div className="col-md-4"><label htmlFor="link5_right_rotate" className="form-label"><span className="form-control-plaintext">LINK5</span></label></div>
           <div className="col-md-8"><input type="number" className="form-control" id="link5_right_rotate" value={link5_right_rotate} onChange={set_link5_right_rotate} min={-180} max={180}/></div>
           <div className="col-md-4"><label htmlFor="link6_right_rotate" className="form-label"><span className="form-control-plaintext">LINK6</span></label></div>
-          <div className="col-md-8"><input type="number" className="form-control" id="link6_right_rotate" value={link6_right_rotate} onChange={set_link6_right_rotate} min={-180} max={180}/></div>
+          <div className="col-md-8"><input type="number" className="form-control" id="link6_right_rotate" value={link6_right_rotate} onChange={set_link6_right_rotate} min={-50} max={115}/></div>
           <div className="col-md-4"><label htmlFor="gripper_base_right_rotate" className="form-label"><span className="form-control-plaintext">GRIP</span></label></div>
-          <div className="col-md-8"><input type="number" className="form-control" id="gripper_base_right_rotate" value={gripper_base_right_rotate} onChange={set_gripper_base_right_rotate} min={-180} max={180}/></div>
+          <div className="col-md-8"><input type="number" className="form-control" id="gripper_base_right_rotate" value={gripper_base_right_rotate} onChange={set_gripper_base_right_rotate} min={-80} max={80}/></div>
           <div className="col-md-4"><label htmlFor="finger_inner_right_rotate" className="form-label"><span className="form-control-plaintext">FINGER1</span></label></div>
           <div className="col-md-8"><input type="number" className="form-control" id="finger_inner_right_rotate" value={finger_inner_right_rotate} onChange={set_finger_inner_right_rotate} min={-180} max={180}/></div>
           <div className="col-md-4"><label htmlFor="finger_outer_right_rotate" className="form-label"><span className="form-control-plaintext">FINGER2</span></label></div>
